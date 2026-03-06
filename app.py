@@ -82,7 +82,7 @@ def fetch_source_map() -> Dict[str, str]:
 def classify_deal_type(deal: Dict, source_map: Dict[str, str]) -> str:
     source_id = str(deal.get("SOURCE_ID") or "")
     source_name = source_map.get(source_id, source_id).strip().lower()
-    if "лендинг" in source_name:
+    if "Лендинг" in source_name:
         return "Сайт"
     return "Лендинг"
 
