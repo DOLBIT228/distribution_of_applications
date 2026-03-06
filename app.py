@@ -197,6 +197,23 @@ def get_daily_summary(direction_name: str) -> Dict[str, Dict[str, int]]:
         conn.close()
 
 
+def clear_daily_distribution(direction_name: str) -> int:
+    distribution_date = date.today().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cursor = conn.execute(
+            """
+            DELETE FROM distribution_history
+            WHERE distribution_date = ? AND direction_name = ?
+            """,
+            (distribution_date, direction_name),
+        )
+        conn.commit()
+        return int(cursor.rowcount or 0)
+    finally:
+        conn.close()
+
+
 def build_summary_table(direction_name: str, selected_managers: List[str]) -> List[Dict]:
     summary = get_daily_summary(direction_name)
     table: List[Dict] = []
@@ -314,6 +331,14 @@ def distribution_screen() -> None:
 
     st.subheader("Таблиця розподілу за сьогодні")
     st.dataframe(build_summary_table(direction_name, selected_managers), use_container_width=True)
+
+    if st.button("Очистити значення", type="secondary"):
+        deleted_rows = clear_daily_distribution(direction_name)
+        if deleted_rows:
+            st.success(f"Очищено записів: {deleted_rows}. Історію розподілу за сьогодні скинуто.")
+        else:
+            st.info("Немає значень для очищення за сьогодні у цьому напрямку.")
+        st.rerun()
 
 
 init_db()
