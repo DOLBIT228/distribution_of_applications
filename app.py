@@ -415,10 +415,7 @@ def distribution_screen() -> None:
 
 
 init_db()
-st.markdown(
-    f'<a href="{DASHBOARD_URL}" target="_self">⬅ Назад до панелі менеджера</a>',
-    unsafe_allow_html=True,
-)
+st.link_button("⬅ Назад до панелі менеджера", DASHBOARD_URL)
 st.divider()
 
 try:
