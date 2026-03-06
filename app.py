@@ -1,3 +1,6 @@
+from collections import defaultdict
+from datetime import date
+import sqlite3
 from typing import Dict, List, Optional
 
 import requests
@@ -5,6 +8,8 @@ import streamlit as st
 
 
 st.set_page_config(page_title="Розподіл заявок", page_icon="📥", layout="wide")
+
+DB_PATH = "distribution_history.db"
 
 
 def _secret_required(path: str):
@@ -49,7 +54,7 @@ def fetch_deals(category_id: int, stage_id: str, limit: int | None = None) -> Li
                 "STAGE_ID": stage_id,
             },
             "order": {"ID": "ASC"},
-            "select": ["ID", "TITLE", "ASSIGNED_BY_ID"],
+            "select": ["ID", "TITLE", "ASSIGNED_BY_ID", "SOURCE_ID"],
             "start": start,
         }
 
@@ -68,11 +73,26 @@ def fetch_deals(category_id: int, stage_id: str, limit: int | None = None) -> Li
     return deals
 
 
-def assign_deal(deal_id: int, manager_id: int) -> None:
+def fetch_source_map() -> Dict[str, str]:
+    payload = {"filter": {"ENTITY_ID": "SOURCE"}}
+    data = bitrix_request("crm.status.list", payload)
+    return {str(item.get("STATUS_ID", "")): str(item.get("NAME", "")) for item in data.get("result", [])}
+
+
+def classify_deal_type(deal: Dict, source_map: Dict[str, str]) -> str:
+    source_id = str(deal.get("SOURCE_ID") or "")
+    source_name = source_map.get(source_id, source_id).strip().lower()
+    if "лендинг" in source_name:
+        return "Сайт"
+    return "Лендинг"
+
+
+def update_deal_assignment_and_stage(deal_id: int, manager_id: int, next_stage_id: str) -> None:
     payload = {
         "id": int(deal_id),
         "fields": {
             "ASSIGNED_BY_ID": int(manager_id),
+            "STAGE_ID": str(next_stage_id),
         },
     }
     bitrix_request("crm.deal.update", payload)
@@ -86,6 +106,93 @@ def get_direction_config() -> Dict[str, Dict]:
 def get_managers_config() -> Dict[str, int]:
     managers = _secret_required("managers")
     return {str(item["name"]): int(item["id"]) for item in managers}
+
+
+def init_db() -> None:
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS distribution_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                distribution_date TEXT NOT NULL,
+                direction_name TEXT NOT NULL,
+                manager_name TEXT NOT NULL,
+                deal_type TEXT NOT NULL,
+                deal_id INTEGER NOT NULL
+            )
+            """
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def store_distribution_rows(direction_name: str, rows: List[Dict]) -> None:
+    if not rows:
+        return
+
+    distribution_date = date.today().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.executemany(
+            """
+            INSERT INTO distribution_history (
+                distribution_date,
+                direction_name,
+                manager_name,
+                deal_type,
+                deal_id
+            ) VALUES (?, ?, ?, ?, ?)
+            """,
+            [
+                (
+                    distribution_date,
+                    direction_name,
+                    row["manager"],
+                    row["deal_type"],
+                    int(row["deal_id"]),
+                )
+                for row in rows
+            ],
+        )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def get_daily_summary(direction_name: str) -> Dict[str, Dict[str, int]]:
+    distribution_date = date.today().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cursor = conn.execute(
+            """
+            SELECT manager_name, deal_type, COUNT(*)
+            FROM distribution_history
+            WHERE distribution_date = ? AND direction_name = ?
+            GROUP BY manager_name, deal_type
+            """,
+            (distribution_date, direction_name),
+        )
+        summary: Dict[str, Dict[str, int]] = defaultdict(lambda: {"Сайт": 0, "Лендинг": 0})
+        for manager_name, deal_type, count in cursor.fetchall():
+            summary[str(manager_name)][str(deal_type)] = int(count)
+        return summary
+    finally:
+        conn.close()
+
+
+def build_summary_table(direction_name: str, selected_managers: List[str]) -> List[Dict]:
+    summary = get_daily_summary(direction_name)
+    table: List[Dict] = [{"Дата": date.today().isoformat(), "Сайт": "", "Лендинг": ""}]
+
+    managers_to_show = selected_managers or sorted(summary.keys())
+    for manager in managers_to_show:
+        site_count = summary.get(manager, {}).get("Сайт", 0)
+        landing_count = summary.get(manager, {}).get("Лендинг", 0)
+        table.append({"Дата": manager, "Сайт": site_count, "Лендинг": landing_count})
+
+    return table
 
 
 def login_screen() -> None:
@@ -132,11 +239,16 @@ def distribution_screen() -> None:
     direction = direction_options[direction_name]
     category_id = int(direction["funnel_id"])
     stage_id = str(direction["status_id"])
+    next_stage_id = str(direction.get("next_status_id") or "").strip()
+
+    if not next_stage_id:
+        st.warning("Для цього напрямку не задано `next_status_id` у secrets.toml. Розподіл заблоковано.")
 
     with st.spinner("Отримуємо кількість заявок..."):
         deals_all = fetch_deals(category_id, stage_id, limit=None)
-    available_count = len(deals_all)
+        source_map = fetch_source_map()
 
+    available_count = len(deals_all)
     st.info(f"Знайдено заявок у статусі: **{available_count}**")
 
     max_to_assign = max(available_count, 1)
@@ -148,7 +260,8 @@ def distribution_screen() -> None:
         step=1,
     )
 
-    if st.button("Розподілити заявки", type="primary", disabled=available_count == 0):
+    disabled = available_count == 0 or not next_stage_id
+    if st.button("Розподілити заявки", type="primary", disabled=disabled):
         if not selected_managers:
             st.warning("Оберіть хоча б одного менеджера.")
             return
@@ -157,25 +270,38 @@ def distribution_screen() -> None:
         target_deals = deals_all[:distribution_size]
 
         manager_ids = [manager_options[name] for name in selected_managers]
+        manager_idx_by_type = {"Сайт": 0, "Лендинг": 0}
         results = []
 
         with st.spinner("Розподіляємо заявки..."):
-            for index, deal in enumerate(target_deals):
-                manager_index = index % len(manager_ids)
+            for deal in target_deals:
+                deal_type = classify_deal_type(deal, source_map)
+                manager_index = manager_idx_by_type[deal_type] % len(manager_ids)
                 manager_id = manager_ids[manager_index]
                 manager_name = selected_managers[manager_index]
-                assign_deal(int(deal["ID"]), manager_id)
+                manager_idx_by_type[deal_type] += 1
+
+                update_deal_assignment_and_stage(int(deal["ID"]), manager_id, next_stage_id)
                 results.append(
                     {
                         "deal_id": int(deal["ID"]),
                         "deal_title": deal.get("TITLE", ""),
+                        "deal_type": deal_type,
                         "manager": manager_name,
+                        "next_stage": next_stage_id,
                     }
                 )
 
-        st.success(f"Успішно розподілено {len(results)} заявок.")
+        store_distribution_rows(direction_name, results)
+
+        st.success(f"Успішно розподілено {len(results)} заявок та переведено у наступний статус.")
         st.dataframe(results, use_container_width=True)
 
+    st.subheader("Таблиця розподілу за сьогодні")
+    st.dataframe(build_summary_table(direction_name, selected_managers), use_container_width=True)
+
+
+init_db()
 
 try:
     if st.session_state.get("authenticated"):
