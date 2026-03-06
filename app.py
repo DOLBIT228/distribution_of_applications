@@ -11,6 +11,16 @@ st.set_page_config(page_title="Розподіл заявок", page_icon="📥",
 
 DB_PATH = "distribution_history.db"
 
+LANDING_SOURCE_NAMES = {
+    "лендинг 1 грам",
+    "лендинг -2=1",
+    "лендинг 2 за 1 оффер",
+    "лендинг каблучки 100$",
+    "лендинг каблучки 1 грам",
+    "лендинг - стара ціна 2025",
+    "лендинг раннє бронювання",
+}
+
 
 def _secret_required(path: str):
     cursor = st.secrets
@@ -82,8 +92,13 @@ def fetch_source_map() -> Dict[str, str]:
 def classify_deal_type(deal: Dict, source_map: Dict[str, str]) -> str:
     source_id = str(deal.get("SOURCE_ID") or "")
     source_name = source_map.get(source_id, source_id).strip().lower()
-    if "Лендинг" in source_name:
+
+    if source_name in LANDING_SOURCE_NAMES:
+        return "Лендинг"
+
+    if source_name == "лендинг":
         return "Сайт"
+
     return "Лендинг"
 
 
@@ -184,13 +199,13 @@ def get_daily_summary(direction_name: str) -> Dict[str, Dict[str, int]]:
 
 def build_summary_table(direction_name: str, selected_managers: List[str]) -> List[Dict]:
     summary = get_daily_summary(direction_name)
-    table: List[Dict] = [{"Дата": date.today().isoformat(), "Сайт": "", "Лендинг": ""}]
+    table: List[Dict] = []
 
     managers_to_show = selected_managers or sorted(summary.keys())
     for manager in managers_to_show:
         site_count = summary.get(manager, {}).get("Сайт", 0)
         landing_count = summary.get(manager, {}).get("Лендинг", 0)
-        table.append({"Дата": manager, "Сайт": site_count, "Лендинг": landing_count})
+        table.append({"Менеджер": manager, "Сайт": site_count, "Лендинг": landing_count})
 
     return table
 
