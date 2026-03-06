@@ -10,6 +10,7 @@ import streamlit as st
 st.set_page_config(page_title="Розподіл заявок", page_icon="📥", layout="wide")
 
 DB_PATH = "distribution_history.db"
+DASHBOARD_URL = "http://localhost:8500"
 
 LANDING_SOURCE_NAMES = {
     "лендинг 1 грам",
@@ -414,6 +415,8 @@ def distribution_screen() -> None:
 
 
 init_db()
+st.link_button("⬅ Назад до панелі менеджера", DASHBOARD_URL)
+st.divider()
 
 try:
     if st.session_state.get("authenticated"):
