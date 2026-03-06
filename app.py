@@ -197,6 +197,68 @@ def get_daily_summary(direction_name: str) -> Dict[str, Dict[str, int]]:
         conn.close()
 
 
+def get_daily_manager_state(direction_name: str) -> Dict[str, Dict[str, Optional[str] | int]]:
+    distribution_date = date.today().isoformat()
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cursor = conn.execute(
+            """
+            SELECT manager_name,
+                   SUM(CASE WHEN deal_type = 'Сайт' THEN 1 ELSE 0 END) AS site_count,
+                   SUM(CASE WHEN deal_type = 'Лендинг' THEN 1 ELSE 0 END) AS landing_count,
+                   MAX(id) AS last_row_id
+            FROM distribution_history
+            WHERE distribution_date = ? AND direction_name = ?
+            GROUP BY manager_name
+            """,
+            (distribution_date, direction_name),
+        )
+        rows = cursor.fetchall()
+
+        last_type_by_manager: Dict[str, str] = {}
+        for manager_name, _, _, last_row_id in rows:
+            if last_row_id is None:
+                continue
+            deal_type_cursor = conn.execute(
+                "SELECT deal_type FROM distribution_history WHERE id = ?",
+                (int(last_row_id),),
+            )
+            deal_type_row = deal_type_cursor.fetchone()
+            if deal_type_row:
+                last_type_by_manager[str(manager_name)] = str(deal_type_row[0])
+
+        state: Dict[str, Dict[str, Optional[str] | int]] = {}
+        for manager_name, site_count, landing_count, _ in rows:
+            state[str(manager_name)] = {
+                "Сайт": int(site_count or 0),
+                "Лендинг": int(landing_count or 0),
+                "total": int(site_count or 0) + int(landing_count or 0),
+                "last_type": last_type_by_manager.get(str(manager_name)),
+            }
+
+        return state
+    finally:
+        conn.close()
+
+
+def select_manager_for_deal(
+    deal_type: str,
+    selected_managers: List[str],
+    manager_state: Dict[str, Dict[str, Optional[str] | int]],
+) -> str:
+    minimum_total = min(int(manager_state[manager]["total"]) for manager in selected_managers)
+    candidates = [manager for manager in selected_managers if int(manager_state[manager]["total"]) == minimum_total]
+
+    preferred_candidates = [
+        manager for manager in candidates if manager_state[manager].get("last_type") != deal_type
+    ]
+    tie_pool = preferred_candidates or candidates
+
+    minimum_type_count = min(int(manager_state[manager][deal_type]) for manager in tie_pool)
+    final_candidates = [manager for manager in tie_pool if int(manager_state[manager][deal_type]) == minimum_type_count]
+    return final_candidates[0]
+
+
 def clear_daily_distribution(direction_name: str) -> int:
     distribution_date = date.today().isoformat()
     conn = sqlite3.connect(DB_PATH)
@@ -280,6 +342,9 @@ def distribution_screen() -> None:
         deals_all = fetch_deals(category_id, stage_id, limit=None)
         source_map = fetch_source_map()
 
+    if st.button("Оновити статус"):
+        st.rerun()
+
     available_count = len(deals_all)
     st.info(f"Знайдено заявок у статусі: **{available_count}**")
 
@@ -301,17 +366,24 @@ def distribution_screen() -> None:
         distribution_size = min(int(amount), available_count)
         target_deals = deals_all[:distribution_size]
 
-        manager_ids = [manager_options[name] for name in selected_managers]
-        manager_idx_by_type = {"Сайт": 0, "Лендинг": 0}
+        manager_ids = {name: manager_options[name] for name in selected_managers}
+        manager_state = get_daily_manager_state(direction_name)
+        for manager_name in selected_managers:
+            manager_state.setdefault(
+                manager_name,
+                {"Сайт": 0, "Лендинг": 0, "total": 0, "last_type": None},
+            )
         results = []
 
         with st.spinner("Розподіляємо заявки..."):
             for deal in target_deals:
                 deal_type = classify_deal_type(deal, source_map)
-                manager_index = manager_idx_by_type[deal_type] % len(manager_ids)
-                manager_id = manager_ids[manager_index]
-                manager_name = selected_managers[manager_index]
-                manager_idx_by_type[deal_type] += 1
+                manager_name = select_manager_for_deal(deal_type, selected_managers, manager_state)
+                manager_id = manager_ids[manager_name]
+
+                manager_state[manager_name][deal_type] = int(manager_state[manager_name][deal_type]) + 1
+                manager_state[manager_name]["total"] = int(manager_state[manager_name]["total"]) + 1
+                manager_state[manager_name]["last_type"] = deal_type
 
                 update_deal_assignment_and_stage(int(deal["ID"]), manager_id, next_stage_id)
                 results.append(
