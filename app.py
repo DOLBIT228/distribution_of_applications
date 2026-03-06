@@ -10,7 +10,7 @@ import streamlit as st
 st.set_page_config(page_title="Розподіл заявок", page_icon="📥", layout="wide")
 
 DB_PATH = "distribution_history.db"
-DASHBOARD_URL = "http://localhost:8500"
+DASHBOARD_URL = "https://panel-for-manager-call.streamlit.app/"
 
 LANDING_SOURCE_NAMES = {
     "лендинг 1 грам",
