@@ -12,11 +12,7 @@ st.set_page_config(page_title="Розподіл заявок", page_icon="📥",
 
 DB_PATH = "distribution_history.db"
 DASHBOARD_URL = "https://panel-for-manager-call.streamlit.app/"
-<<<<<<< codex/implement-multi-manager-workflow-logic-b4vzqp
 DEFAULT_BATCH_SIZE = 5
-=======
-DEFAULT_BATCH_SIZE = 3
->>>>>>> main
 
 LANDING_SOURCE_NAMES = {
     "лендинг 1 грам",
@@ -489,10 +485,7 @@ def distribution_screen() -> None:
     distribution_logic = get_direction_logic(direction_name, direction)
     deal_types = get_deal_types_for_logic(distribution_logic)
     batch_size = int(direction.get("batch_size") or DEFAULT_BATCH_SIZE)
-<<<<<<< codex/implement-multi-manager-workflow-logic-b4vzqp
     auto_interval_seconds = int(direction.get("auto_interval_seconds") or 30)
-=======
->>>>>>> main
 
     if not next_stage_id:
         st.warning("Для цього напрямку не задано `next_status_id` у secrets.toml. Розподіл заблоковано.")
@@ -512,7 +505,6 @@ def distribution_screen() -> None:
     else:
         st.caption("Логіка напрямку: Сайт/Лендинг (розподіл по джерелах)")
 
-<<<<<<< codex/implement-multi-manager-workflow-logic-b4vzqp
     action_col1, action_col2, action_col3 = st.columns(3)
     with action_col1:
         if st.button("Розподілити заявки 1 раз", type="primary", disabled=available_count == 0 or not next_stage_id):
@@ -587,63 +579,6 @@ def distribution_screen() -> None:
                 source_map=source_map,
             )
         st.session_state["auto_distribution_last_run"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-=======
-    disabled = available_count == 0 or not next_stage_id
-    if st.button("Розподілити заявки", type="primary", disabled=disabled):
-        if not selected_managers:
-            st.warning("Оберіть хоча б одного менеджера.")
-            return
-
-        manager_ids = {name: manager_options[name] for name in selected_managers}
-
-        with st.spinner("Перевіряємо зайнятість менеджерів у статусі 'Угода в роботі'..."):
-            in_progress_counts = {
-                manager_name: fetch_deal_count_for_manager(category_id, in_progress_stage_id, manager_ids[manager_name])
-                for manager_name in selected_managers
-            }
-
-        available_managers = [
-            manager_name for manager_name in selected_managers if in_progress_counts[manager_name] == 0
-        ]
-
-        if not available_managers:
-            st.warning("Немає вільних менеджерів: у всіх є активні угоди в статусі 'Угода в роботі'.")
-            st.dataframe(
-                [{"Менеджер": name, "Активних в роботі": in_progress_counts[name]} for name in selected_managers],
-                use_container_width=True,
-            )
-            return
-
-        max_for_batch = len(available_managers) * batch_size
-        distribution_size = min(available_count, max_for_batch)
-        target_deals = deals_all[:distribution_size]
-
-        manager_state = get_daily_manager_state(direction_name, available_managers, deal_types)
-        results = []
-
-        with st.spinner("Розподіляємо заявки пачками..."):
-            for deal in target_deals:
-                deal_type = classify_deal_type(deal, source_map, distribution_logic)
-                manager_name = select_manager_for_deal(deal_type, available_managers, manager_state, distribution_logic)
-                manager_id = manager_ids[manager_name]
-
-                if deal_type not in manager_state[manager_name]:
-                    manager_state[manager_name][deal_type] = 0
-                manager_state[manager_name][deal_type] = int(manager_state[manager_name][deal_type]) + 1
-                manager_state[manager_name]["total"] = int(manager_state[manager_name]["total"]) + 1
-                manager_state[manager_name]["last_type"] = deal_type
-
-                update_deal_assignment_and_stage(int(deal["ID"]), manager_id, next_stage_id)
-                results.append(
-                    {
-                        "deal_id": int(deal["ID"]),
-                        "deal_title": deal.get("TITLE", ""),
-                        "deal_type": deal_type,
-                        "manager": manager_name,
-                        "next_stage": next_stage_id,
-                    }
-                )
->>>>>>> main
 
         status = run_result["status"]
         if status == "success":
@@ -664,25 +599,12 @@ def distribution_screen() -> None:
         if run_result.get("results"):
             st.dataframe(run_result["results"], use_container_width=True)
 
-<<<<<<< codex/implement-multi-manager-workflow-logic-b4vzqp
         st.caption(
             f"Останній авто-запуск: {st.session_state.get('auto_distribution_last_run', '-')}. "
             "Сторінка перезапуститься автоматично."
         )
         time.sleep(auto_interval_seconds)
         st.rerun()
-=======
-        st.success(
-            f"Успішно розподілено {len(results)} заявок. Вільних менеджерів: {len(available_managers)}. "
-            f"Розмір пачки: {batch_size}."
-        )
-
-        st.dataframe(
-            [{"Менеджер": name, "Активних в роботі": in_progress_counts[name]} for name in selected_managers],
-            use_container_width=True,
-        )
-        st.dataframe(results, use_container_width=True)
->>>>>>> main
 
     st.subheader("Таблиця розподілу за сьогодні")
     st.dataframe(build_summary_table(direction_name, selected_managers, deal_types), use_container_width=True)
