@@ -59,6 +59,15 @@ def _secret_required(path: str):
     return cursor
 
 
+def _secret_optional(path: str, default=None):
+    cursor = st.secrets
+    for key in path.split("."):
+        if key not in cursor:
+            return default
+        cursor = cursor[key]
+    return cursor
+
+
 def get_auth_user(login: str, password: str) -> Optional[Dict]:
     users = _secret_required("auth.users")
     for user in users:
@@ -258,6 +267,59 @@ def get_daily_summary(direction_name: str) -> Dict[str, Dict[str, int]]:
         return summary
     finally:
         conn.close()
+
+
+def build_stop_report_message(
+    direction_name: str,
+    selected_managers: List[str],
+    deal_types: List[str],
+) -> str:
+    summary = get_daily_summary(direction_name)
+    managers_to_show = selected_managers or sorted(summary.keys())
+
+    lines = [f"📊 Звіт по розподілу ({direction_name}) за {date.today().isoformat()}:"]
+    if not summary:
+        lines.append("За сьогодні ще немає розподілених заявок.")
+        return "\n".join(lines)
+
+    for manager in managers_to_show:
+        manager_summary = summary.get(manager, {})
+        total = sum(int(manager_summary.get(deal_type, 0)) for deal_type in deal_types)
+        if total == 0:
+            continue
+
+        detail = ", ".join(
+            f"{deal_type}: {int(manager_summary.get(deal_type, 0))}"
+            for deal_type in deal_types
+            if int(manager_summary.get(deal_type, 0)) > 0
+        )
+        lines.append(f"• {manager}: {total} шт. ({detail})")
+
+    if len(lines) == 1:
+        lines.append("За обраними менеджерами немає розподілених заявок.")
+
+    return "\n".join(lines)
+
+
+def send_chatbot_message(text: str) -> None:
+    webhook_url = str(_secret_optional("chatbot.webhook_url", "") or "").strip()
+    telegram_token = str(_secret_optional("chatbot.telegram_bot_token", "") or "").strip()
+    telegram_chat_id = str(_secret_optional("chatbot.telegram_chat_id", "") or "").strip()
+
+    try:
+        if webhook_url:
+            requests.post(webhook_url, json={"text": text}, timeout=15).raise_for_status()
+            return
+
+        if telegram_token and telegram_chat_id:
+            requests.post(
+                f"https://api.telegram.org/bot{telegram_token}/sendMessage",
+                json={"chat_id": telegram_chat_id, "text": text},
+                timeout=15,
+            ).raise_for_status()
+    except Exception:
+        # Бот не має блокувати основну бізнес-логіку розподілу.
+        pass
 
 
 def get_daily_manager_state(
@@ -505,6 +567,8 @@ def distribution_screen() -> None:
         st.session_state["auto_distribution_last_run"] = None
     if "last_in_progress_counts" not in st.session_state:
         st.session_state["last_in_progress_counts"] = {}
+    if "pending_control_action" not in st.session_state:
+        st.session_state["pending_control_action"] = None
 
     col1, col2 = st.columns(2)
     with col1:
@@ -560,6 +624,18 @@ def distribution_screen() -> None:
             ),
         ):
             st.session_state["auto_distribution_state"] = "running"
+            st.session_state["pending_control_action"] = None
+            managers_text = ", ".join(selected_managers) if selected_managers else "не обрано"
+            send_chatbot_message(
+                "\n".join(
+                    [
+                        "▶️ Розподіл заявок розпочато.",
+                        f"Напрямок: {direction_name}",
+                        f"Користувач: {user.get('name', '-')}",
+                        f"Менеджери: {managers_text}",
+                    ]
+                )
+            )
             st.rerun()
 
     with action_col2:
@@ -567,14 +643,61 @@ def distribution_screen() -> None:
             "Пауза",
             disabled=st.session_state["auto_distribution_state"] != "running",
         ):
-            st.session_state["auto_distribution_state"] = "paused"
-            st.rerun()
+            st.session_state["pending_control_action"] = "pause"
 
     with action_col3:
         if st.button("Зупинити авто-розподіл", disabled=st.session_state["auto_distribution_state"] == "stopped"):
-            st.session_state["auto_distribution_state"] = "stopped"
-            st.session_state["auto_distribution_last_run"] = None
-            st.rerun()
+            st.session_state["pending_control_action"] = "stop"
+
+    pending_action = st.session_state.get("pending_control_action")
+    if pending_action in {"pause", "stop"}:
+        action_label = "паузу" if pending_action == "pause" else "зупинку"
+        with st.form(f"{pending_action}_reason_form", clear_on_submit=True):
+            reason = st.text_input(f"Вкажіть причину, чому ставите на {action_label}")
+            confirm = st.form_submit_button(f"Підтвердити {action_label}")
+            cancel = st.form_submit_button("Скасувати")
+
+            if cancel:
+                st.session_state["pending_control_action"] = None
+                st.rerun()
+
+            if confirm:
+                if not reason.strip():
+                    st.warning("Причина обов'язкова.")
+                else:
+                    if pending_action == "pause":
+                        st.session_state["auto_distribution_state"] = "paused"
+                        send_chatbot_message(
+                            "\n".join(
+                                [
+                                    "⏸️ Розподіл поставлено на паузу.",
+                                    f"Напрямок: {direction_name}",
+                                    f"Користувач: {user.get('name', '-')}",
+                                    f"Причина: {reason.strip()}",
+                                ]
+                            )
+                        )
+                    else:
+                        st.session_state["auto_distribution_state"] = "stopped"
+                        st.session_state["auto_distribution_last_run"] = None
+                        stop_report = build_stop_report_message(direction_name, selected_managers, deal_types)
+                        send_chatbot_message(
+                            "\n\n".join(
+                                [
+                                    "\n".join(
+                                        [
+                                            "⏹️ Розподіл зупинено.",
+                                            f"Напрямок: {direction_name}",
+                                            f"Користувач: {user.get('name', '-')}",
+                                            f"Причина: {reason.strip()}",
+                                        ]
+                                    ),
+                                    stop_report,
+                                ]
+                            )
+                        )
+                    st.session_state["pending_control_action"] = None
+                    st.rerun()
 
     auto_state = st.session_state["auto_distribution_state"]
     should_autorefresh = False
