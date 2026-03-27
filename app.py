@@ -12,7 +12,7 @@ st.set_page_config(page_title="Розподіл заявок", page_icon="📥",
 
 DB_PATH = "distribution_history.db"
 DASHBOARD_URL = "https://panel-for-manager-call.streamlit.app/"
-DEFAULT_BATCH_SIZE = 5
+DEFAULT_BATCH_SIZE = 3
 
 LANDING_SOURCE_NAMES = {
     "лендинг 1 грам",
@@ -361,7 +361,7 @@ def run_distribution_once(
     *,
     category_id: int,
     direction_name: str,
-    next_stage_id: str,
+    target_stage_id: str,
     in_progress_stage_id: str,
     distribution_logic: str,
     deal_types: List[str],
@@ -422,14 +422,14 @@ def run_distribution_once(
         manager_state[manager_name]["last_type"] = deal_type
         batch_load[manager_name] = int(batch_load[manager_name]) + 1
 
-        update_deal_assignment_and_stage(int(deal["ID"]), manager_id, next_stage_id)
+        update_deal_assignment_and_stage(int(deal["ID"]), manager_id, target_stage_id)
         results.append(
             {
                 "deal_id": int(deal["ID"]),
                 "deal_title": deal.get("TITLE", ""),
                 "deal_type": deal_type,
                 "manager": manager_name,
-                "next_stage": next_stage_id,
+                "next_stage": target_stage_id,
             }
         )
 
@@ -497,13 +497,17 @@ def distribution_screen() -> None:
     stage_id = str(direction["status_id"])
     next_stage_id = str(direction.get("next_status_id") or "").strip()
     in_progress_stage_id = str(direction.get("in_progress_status_id") or next_stage_id).strip()
+    target_stage_id = in_progress_stage_id or next_stage_id
     distribution_logic = get_direction_logic(direction_name, direction)
     deal_types = get_deal_types_for_logic(distribution_logic)
     batch_size = int(direction.get("batch_size") or DEFAULT_BATCH_SIZE)
     auto_interval_seconds = int(direction.get("auto_interval_seconds") or 30)
 
-    if not next_stage_id:
-        st.warning("Для цього напрямку не задано `next_status_id` у secrets.toml. Розподіл заблоковано.")
+    if not target_stage_id:
+        st.warning(
+            "Для цього напрямку не задано `in_progress_status_id` (або запасний `next_status_id`) у secrets.toml. "
+            "Розподіл заблоковано."
+        )
 
     with st.spinner("Отримуємо заявки та джерела..."):
         deals_all = fetch_deals(category_id, stage_id, limit=None)
@@ -522,12 +526,16 @@ def distribution_screen() -> None:
 
     action_col1, action_col2, action_col3 = st.columns(3)
     with action_col1:
-        if st.button("Розподілити заявки 1 раз", type="primary", disabled=available_count == 0 or not next_stage_id):
+        if st.button(
+            "Розподілити заявки 1 раз",
+            type="primary",
+            disabled=available_count == 0 or not target_stage_id,
+        ):
             with st.spinner("Розподіляємо заявки..."):
                 run_result = run_distribution_once(
                     category_id=category_id,
                     direction_name=direction_name,
-                    next_stage_id=next_stage_id,
+                    target_stage_id=target_stage_id,
                     in_progress_stage_id=in_progress_stage_id,
                     distribution_logic=distribution_logic,
                     deal_types=deal_types,
@@ -560,7 +568,7 @@ def distribution_screen() -> None:
     with action_col2:
         if st.button(
             "Почати авто-розподіл",
-            disabled=st.session_state["auto_distribution_enabled"] or not next_stage_id or not selected_managers,
+            disabled=st.session_state["auto_distribution_enabled"] or not target_stage_id or not selected_managers,
         ):
             st.session_state["auto_distribution_enabled"] = True
             st.rerun()
@@ -583,7 +591,7 @@ def distribution_screen() -> None:
             run_result = run_distribution_once(
                 category_id=category_id,
                 direction_name=direction_name,
-                next_stage_id=next_stage_id,
+                target_stage_id=target_stage_id,
                 in_progress_stage_id=in_progress_stage_id,
                 distribution_logic=distribution_logic,
                 deal_types=deal_types,
