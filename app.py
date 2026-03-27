@@ -10,6 +10,28 @@ import streamlit as st
 
 st.set_page_config(page_title="Розподіл заявок", page_icon="📥", layout="wide")
 
+st.markdown(
+    """
+    <style>
+        .stApp {
+            background: linear-gradient(180deg, #f8fbff 0%, #eef5ff 100%);
+        }
+        .block-container {
+            padding-top: 1.5rem;
+            padding-bottom: 2rem;
+        }
+        div[data-testid="stMetric"] {
+            background: #ffffff;
+            border: 1px solid #dbe7ff;
+            border-radius: 14px;
+            padding: 12px 16px;
+            box-shadow: 0 6px 18px rgba(27, 74, 149, 0.08);
+        }
+    </style>
+    """,
+    unsafe_allow_html=True,
+)
+
 DB_PATH = "distribution_history.db"
 DASHBOARD_URL = "https://panel-for-manager-call.streamlit.app/"
 DEFAULT_BATCH_SIZE = 3
@@ -477,10 +499,12 @@ def distribution_screen() -> None:
     direction_options = get_direction_config()
     manager_options = get_managers_config()
 
-    if "auto_distribution_enabled" not in st.session_state:
-        st.session_state["auto_distribution_enabled"] = False
+    if "auto_distribution_state" not in st.session_state:
+        st.session_state["auto_distribution_state"] = "stopped"
     if "auto_distribution_last_run" not in st.session_state:
         st.session_state["auto_distribution_last_run"] = None
+    if "last_in_progress_counts" not in st.session_state:
+        st.session_state["last_in_progress_counts"] = {}
 
     col1, col2 = st.columns(2)
     with col1:
@@ -527,61 +551,32 @@ def distribution_screen() -> None:
     action_col1, action_col2, action_col3 = st.columns(3)
     with action_col1:
         if st.button(
-            "Розподілити заявки 1 раз",
+            "Почати авто-розподіл",
             type="primary",
-            disabled=available_count == 0 or not target_stage_id,
+            disabled=not target_stage_id or not selected_managers,
         ):
-            with st.spinner("Розподіляємо заявки..."):
-                run_result = run_distribution_once(
-                    category_id=category_id,
-                    direction_name=direction_name,
-                    target_stage_id=target_stage_id,
-                    in_progress_stage_id=in_progress_stage_id,
-                    distribution_logic=distribution_logic,
-                    deal_types=deal_types,
-                    batch_size=batch_size,
-                    selected_managers=selected_managers,
-                    manager_options=manager_options,
-                    deals_all=deals_all,
-                    source_map=source_map,
-                )
-            st.session_state["auto_distribution_last_run"] = datetime.utcnow().strftime("%Y-%m-%d %H:%M:%S UTC")
-            status = run_result["status"]
-            if status == "success":
-                st.success(run_result["message"])
-            elif status == "warning":
-                st.warning(run_result["message"])
-            else:
-                st.info(run_result["message"])
-
-            if run_result.get("in_progress_counts"):
-                st.dataframe(
-                    [
-                        {"Менеджер": name, "Активних в роботі": run_result["in_progress_counts"][name]}
-                        for name in selected_managers
-                    ],
-                    use_container_width=True,
-                )
-            if run_result.get("results"):
-                st.dataframe(run_result["results"], use_container_width=True)
+            st.session_state["auto_distribution_state"] = "running"
+            st.rerun()
 
     with action_col2:
         if st.button(
-            "Почати авто-розподіл",
-            disabled=st.session_state["auto_distribution_enabled"] or not target_stage_id or not selected_managers,
+            "Пауза",
+            disabled=st.session_state["auto_distribution_state"] != "running",
         ):
-            st.session_state["auto_distribution_enabled"] = True
+            st.session_state["auto_distribution_state"] = "paused"
             st.rerun()
 
     with action_col3:
-        if st.button("Зупинити авто-розподіл", disabled=not st.session_state["auto_distribution_enabled"]):
-            st.session_state["auto_distribution_enabled"] = False
+        if st.button("Зупинити авто-розподіл", disabled=st.session_state["auto_distribution_state"] == "stopped"):
+            st.session_state["auto_distribution_state"] = "stopped"
+            st.session_state["auto_distribution_last_run"] = None
             st.rerun()
 
-    if st.session_state["auto_distribution_enabled"]:
+    auto_state = st.session_state["auto_distribution_state"]
+    if auto_state == "running":
         if not selected_managers:
             st.warning("Авто-режим зупинено: оберіть хоча б одного менеджера для розподілу.")
-            st.session_state["auto_distribution_enabled"] = False
+            st.session_state["auto_distribution_state"] = "stopped"
             st.rerun()
 
         st.success(
@@ -612,15 +607,7 @@ def distribution_screen() -> None:
             st.info(run_result["message"])
 
         if run_result.get("in_progress_counts"):
-            st.dataframe(
-                [
-                    {"Менеджер": name, "Активних в роботі": run_result["in_progress_counts"][name]}
-                    for name in selected_managers
-                ],
-                use_container_width=True,
-            )
-        if run_result.get("results"):
-            st.dataframe(run_result["results"], use_container_width=True)
+            st.session_state["last_in_progress_counts"] = run_result["in_progress_counts"]
 
         st.caption(
             f"Останній авто-запуск: {st.session_state.get('auto_distribution_last_run', '-')}. "
@@ -628,9 +615,28 @@ def distribution_screen() -> None:
         )
         time.sleep(auto_interval_seconds)
         st.rerun()
+    elif auto_state == "paused":
+        st.warning("Авто-розподіл на паузі. Для продовження натисніть «Почати авто-розподіл».")
+    else:
+        st.info("Авто-розподіл зупинено.")
 
     st.subheader("Таблиця розподілу за сьогодні")
     st.dataframe(build_summary_table(direction_name, selected_managers, deal_types), use_container_width=True)
+
+    st.subheader("Кількість в роботі у менеджера")
+    counts = st.session_state.get("last_in_progress_counts", {})
+    if counts and selected_managers:
+        st.dataframe(
+            [
+                {"Менеджер": name, "Активних в роботі": counts.get(name, 0)}
+                for name in selected_managers
+            ],
+            use_container_width=True,
+        )
+    elif selected_managers:
+        st.info("Дані з'являться після першого запуску авто-розподілу.")
+    else:
+        st.info("Оберіть менеджерів, щоб побачити таблицю навантаження.")
 
     if st.button("Очистити значення", type="secondary"):
         deleted_rows = clear_daily_distribution(direction_name)
