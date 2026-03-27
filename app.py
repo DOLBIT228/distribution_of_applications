@@ -11,7 +11,7 @@ st.set_page_config(page_title="Розподіл заявок", page_icon="📥",
 
 DB_PATH = "distribution_history.db"
 DASHBOARD_URL = "https://panel-for-manager-call.streamlit.app/"
-DEFAULT_BATCH_SIZE = 5
+DEFAULT_BATCH_SIZE = 3
 
 LANDING_SOURCE_NAMES = {
     "лендинг 1 грам",
