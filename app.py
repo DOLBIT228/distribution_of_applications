@@ -553,7 +553,11 @@ def distribution_screen() -> None:
         if st.button(
             "Почати авто-розподіл",
             type="primary",
-            disabled=not target_stage_id or not selected_managers,
+            disabled=(
+                not target_stage_id
+                or not selected_managers
+                or st.session_state["auto_distribution_state"] == "running"
+            ),
         ):
             st.session_state["auto_distribution_state"] = "running"
             st.rerun()
@@ -573,6 +577,7 @@ def distribution_screen() -> None:
             st.rerun()
 
     auto_state = st.session_state["auto_distribution_state"]
+    should_autorefresh = False
     if auto_state == "running":
         if not selected_managers:
             st.warning("Авто-режим зупинено: оберіть хоча б одного менеджера для розподілу.")
@@ -611,10 +616,9 @@ def distribution_screen() -> None:
 
         st.caption(
             f"Останній авто-запуск: {st.session_state.get('auto_distribution_last_run', '-')}. "
-            "Сторінка перезапуститься автоматично."
+            "Сторінка перезапуститься автоматично після оновлення таблиць."
         )
-        time.sleep(auto_interval_seconds)
-        st.rerun()
+        should_autorefresh = True
     elif auto_state == "paused":
         st.warning("Авто-розподіл на паузі. Для продовження натисніть «Почати авто-розподіл».")
     else:
@@ -644,6 +648,10 @@ def distribution_screen() -> None:
             st.success(f"Очищено записів: {deleted_rows}. Історію розподілу за сьогодні скинуто.")
         else:
             st.info("Немає значень для очищення за сьогодні у цьому напрямку.")
+        st.rerun()
+
+    if should_autorefresh:
+        time.sleep(auto_interval_seconds)
         st.rerun()
 
 
