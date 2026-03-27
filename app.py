@@ -303,9 +303,15 @@ def select_manager_for_deal(
     selected_managers: List[str],
     manager_state: Dict[str, Dict[str, Optional[str] | int]],
     logic: str,
+    batch_load: Dict[str, int],
+    batch_size: int,
 ) -> str:
-    minimum_total = min(int(manager_state[manager]["total"]) for manager in selected_managers)
-    candidates = [manager for manager in selected_managers if int(manager_state[manager]["total"]) == minimum_total]
+    under_limit = [manager for manager in selected_managers if int(batch_load[manager]) < batch_size]
+    if not under_limit:
+        raise RuntimeError("Немає доступних менеджерів у межах поточної пачки.")
+
+    minimum_batch_total = min(int(batch_load[manager]) for manager in under_limit)
+    candidates = [manager for manager in under_limit if int(batch_load[manager]) == minimum_batch_total]
 
     if logic == "instagram":
         return candidates[0]
@@ -394,11 +400,19 @@ def run_distribution_once(
     target_deals = deals_all[:distribution_size]
 
     manager_state = get_daily_manager_state(direction_name, available_managers, deal_types)
+    batch_load = {manager_name: 0 for manager_name in available_managers}
     results = []
 
     for deal in target_deals:
         deal_type = classify_deal_type(deal, source_map, distribution_logic)
-        manager_name = select_manager_for_deal(deal_type, available_managers, manager_state, distribution_logic)
+        manager_name = select_manager_for_deal(
+            deal_type,
+            available_managers,
+            manager_state,
+            distribution_logic,
+            batch_load,
+            batch_size,
+        )
         manager_id = manager_ids[manager_name]
 
         if deal_type not in manager_state[manager_name]:
@@ -406,6 +420,7 @@ def run_distribution_once(
         manager_state[manager_name][deal_type] = int(manager_state[manager_name][deal_type]) + 1
         manager_state[manager_name]["total"] = int(manager_state[manager_name]["total"]) + 1
         manager_state[manager_name]["last_type"] = deal_type
+        batch_load[manager_name] = int(batch_load[manager_name]) + 1
 
         update_deal_assignment_and_stage(int(deal["ID"]), manager_id, next_stage_id)
         results.append(
