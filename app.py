@@ -787,7 +787,11 @@ def distribution_screen() -> None:
         st.info("Авто-розподіл зупинено.")
 
     st.subheader("Таблиця розподілу за сьогодні")
-    managers_for_table = active_managers if auto_state in {"running", "reconfiguring"} and active_managers else selected_managers
+    summary_managers = sorted(get_daily_summary(direction_name).keys())
+    if auto_state in {"running", "reconfiguring"} and active_managers:
+        managers_for_table = list(dict.fromkeys(active_managers + selected_managers + summary_managers))
+    else:
+        managers_for_table = list(dict.fromkeys(selected_managers + summary_managers))
     st.dataframe(build_summary_table(direction_name, managers_for_table, deal_types), use_container_width=True)
 
     st.subheader("Кількість в роботі у менеджера")
