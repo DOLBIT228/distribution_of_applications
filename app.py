@@ -569,16 +569,22 @@ def distribution_screen() -> None:
         st.session_state["last_in_progress_counts"] = {}
     if "pending_control_action" not in st.session_state:
         st.session_state["pending_control_action"] = None
+    if "manager_selection" not in st.session_state:
+        st.session_state["manager_selection"] = []
+    if "active_managers" not in st.session_state:
+        st.session_state["active_managers"] = []
 
     col1, col2 = st.columns(2)
     with col1:
         direction_name = st.selectbox("Напрямок", list(direction_options.keys()))
     with col2:
-        selected_managers = st.multiselect(
+        st.multiselect(
             "Менеджери для розподілу",
             options=list(manager_options.keys()),
+            key="manager_selection",
             help="ID менеджерів не показуються в інтерфейсі.",
         )
+    selected_managers = list(st.session_state.get("manager_selection", []))
 
     direction = direction_options[direction_name]
     category_id = int(direction["funnel_id"])
@@ -612,7 +618,7 @@ def distribution_screen() -> None:
     else:
         st.caption("Логіка напрямку: Сайт/Лендинг (розподіл по джерелах)")
 
-    action_col1, action_col2, action_col3 = st.columns(3)
+    action_col1, action_col2, action_col3, action_col4 = st.columns(4)
     with action_col1:
         if st.button(
             "Почати авто-розподіл",
@@ -623,9 +629,10 @@ def distribution_screen() -> None:
                 or st.session_state["auto_distribution_state"] == "running"
             ),
         ):
+            st.session_state["active_managers"] = selected_managers.copy()
             st.session_state["auto_distribution_state"] = "running"
             st.session_state["pending_control_action"] = None
-            managers_text = ", ".join(selected_managers) if selected_managers else "не обрано"
+            managers_text = ", ".join(st.session_state["active_managers"]) if st.session_state["active_managers"] else "не обрано"
             send_chatbot_message(
                 "\n".join(
                     [
@@ -648,6 +655,16 @@ def distribution_screen() -> None:
     with action_col3:
         if st.button("Зупинити авто-розподіл", disabled=st.session_state["auto_distribution_state"] == "stopped"):
             st.session_state["pending_control_action"] = "stop"
+
+    with action_col4:
+        if st.button(
+            "Пауза для зміни менеджерів",
+            disabled=st.session_state["auto_distribution_state"] != "running",
+            help="Коротка пауза: змініть список менеджерів і продовжіть без повної зупинки.",
+        ):
+            st.session_state["auto_distribution_state"] = "reconfiguring"
+            st.session_state["pending_control_action"] = None
+            st.rerun()
 
     pending_action = st.session_state.get("pending_control_action")
     if pending_action in {"pause", "stop"}:
@@ -700,9 +717,10 @@ def distribution_screen() -> None:
                     st.rerun()
 
     auto_state = st.session_state["auto_distribution_state"]
+    active_managers = list(st.session_state.get("active_managers", []))
     should_autorefresh = False
     if auto_state == "running":
-        if not selected_managers:
+        if not active_managers:
             st.warning("Авто-режим зупинено: оберіть хоча б одного менеджера для розподілу.")
             st.session_state["auto_distribution_state"] = "stopped"
             st.rerun()
@@ -719,7 +737,7 @@ def distribution_screen() -> None:
                 distribution_logic=distribution_logic,
                 deal_types=deal_types,
                 batch_size=batch_size,
-                selected_managers=selected_managers,
+                selected_managers=active_managers,
                 manager_options=manager_options,
                 deals_all=deals_all,
                 source_map=source_map,
@@ -741,26 +759,48 @@ def distribution_screen() -> None:
             f"Останній авто-запуск: {st.session_state.get('auto_distribution_last_run', '-')}. "
             "Сторінка перезапуститься автоматично після оновлення таблиць."
         )
+        if active_managers:
+            st.caption(f"Активні менеджери в поточному розподілі: {', '.join(active_managers)}")
         should_autorefresh = True
+    elif auto_state == "reconfiguring":
+        st.warning(
+            "Коротка пауза для зміни ділення. Оновіть список менеджерів і натисніть "
+            "«Продовжити з новим діленням»."
+        )
+        reconfig_col1, reconfig_col2 = st.columns(2)
+        with reconfig_col1:
+            if st.button(
+                "Продовжити з новим діленням",
+                type="primary",
+                disabled=not selected_managers,
+            ):
+                st.session_state["active_managers"] = selected_managers.copy()
+                st.session_state["auto_distribution_state"] = "running"
+                st.rerun()
+        with reconfig_col2:
+            if st.button("Скасувати зміну менеджерів"):
+                st.session_state["auto_distribution_state"] = "running"
+                st.rerun()
     elif auto_state == "paused":
         st.warning("Авто-розподіл на паузі. Для продовження натисніть «Почати авто-розподіл».")
     else:
         st.info("Авто-розподіл зупинено.")
 
     st.subheader("Таблиця розподілу за сьогодні")
-    st.dataframe(build_summary_table(direction_name, selected_managers, deal_types), use_container_width=True)
+    managers_for_table = active_managers if auto_state in {"running", "reconfiguring"} and active_managers else selected_managers
+    st.dataframe(build_summary_table(direction_name, managers_for_table, deal_types), use_container_width=True)
 
     st.subheader("Кількість в роботі у менеджера")
     counts = st.session_state.get("last_in_progress_counts", {})
-    if counts and selected_managers:
+    if counts and managers_for_table:
         st.dataframe(
             [
                 {"Менеджер": name, "Активних в роботі": counts.get(name, 0)}
-                for name in selected_managers
+                for name in managers_for_table
             ],
             use_container_width=True,
         )
-    elif selected_managers:
+    elif managers_for_table:
         st.info("Дані з'являться після першого запуску авто-розподілу.")
     else:
         st.info("Оберіть менеджерів, щоб побачити таблицю навантаження.")
