@@ -573,6 +573,8 @@ def distribution_screen() -> None:
         st.session_state["manager_selection"] = []
     if "active_managers" not in st.session_state:
         st.session_state["active_managers"] = []
+    if "reconfig_previous_managers" not in st.session_state:
+        st.session_state["reconfig_previous_managers"] = []
 
     col1, col2 = st.columns(2)
     with col1:
@@ -662,6 +664,7 @@ def distribution_screen() -> None:
             disabled=st.session_state["auto_distribution_state"] != "running",
             help="Коротка пауза: змініть список менеджерів і продовжіть без повної зупинки.",
         ):
+            st.session_state["reconfig_previous_managers"] = list(st.session_state.get("active_managers", []))
             st.session_state["auto_distribution_state"] = "reconfiguring"
             st.session_state["pending_control_action"] = None
             st.rerun()
@@ -767,20 +770,44 @@ def distribution_screen() -> None:
             "Коротка пауза для зміни ділення. Оновіть список менеджерів і натисніть "
             "«Продовжити з новим діленням»."
         )
-        reconfig_col1, reconfig_col2 = st.columns(2)
-        with reconfig_col1:
-            if st.button(
+        previous_managers = list(st.session_state.get("reconfig_previous_managers", []))
+        with st.form("manager_change_reason_form", clear_on_submit=True):
+            reason = st.text_input("Вкажіть причину зміни менеджерів")
+            apply_change = st.form_submit_button(
                 "Продовжити з новим діленням",
                 type="primary",
                 disabled=not selected_managers,
-            ):
-                st.session_state["active_managers"] = selected_managers.copy()
+            )
+            cancel_change = st.form_submit_button("Скасувати зміну менеджерів")
+
+            if cancel_change:
+                st.session_state["reconfig_previous_managers"] = []
                 st.session_state["auto_distribution_state"] = "running"
                 st.rerun()
-        with reconfig_col2:
-            if st.button("Скасувати зміну менеджерів"):
-                st.session_state["auto_distribution_state"] = "running"
-                st.rerun()
+
+            if apply_change:
+                if not reason.strip():
+                    st.warning("Причина зміни менеджерів обов'язкова.")
+                else:
+                    st.session_state["active_managers"] = selected_managers.copy()
+                    st.session_state["auto_distribution_state"] = "running"
+                    st.session_state["reconfig_previous_managers"] = []
+
+                    previous_text = ", ".join(previous_managers) if previous_managers else "не обрано"
+                    new_text = ", ".join(selected_managers) if selected_managers else "не обрано"
+                    send_chatbot_message(
+                        "\n".join(
+                            [
+                                "🔄 Змінено менеджерів у розподілі.",
+                                f"Напрямок: {direction_name}",
+                                f"Користувач: {user.get('name', '-')}",
+                                f"Було: {previous_text}",
+                                f"Стало: {new_text}",
+                                f"Причина: {reason.strip()}",
+                            ]
+                        )
+                    )
+                    st.rerun()
     elif auto_state == "paused":
         st.warning("Авто-розподіл на паузі. Для продовження натисніть «Почати авто-розподіл».")
     else:
