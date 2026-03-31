@@ -1,6 +1,7 @@
 from collections import defaultdict
 from contextlib import closing
 from datetime import date, datetime
+from pathlib import Path
 import sqlite3
 import time
 from typing import Dict, List, Optional
@@ -36,6 +37,7 @@ st.markdown(
 DB_PATH = "distribution_history.db"
 DASHBOARD_URL = "https://panel-for-manager-call.streamlit.app/"
 DEFAULT_BATCH_SIZE = 3
+ONBOARDING_MEDIA_DIR = Path("onboarding_media")
 
 SITE_DEAL_TYPES = ["Сайт (Тест)"]
 
@@ -546,24 +548,28 @@ def render_onboarding_modal(user_login: str) -> None:
             "description": (
                 "Коротко покажемо, як працює сервіс. Вставте тут GIF або міні-відео з загальним оглядом."
             ),
+            "media_file": "gif-1.webp",
         },
         {
             "title": "Оберіть менеджерів і напрямок",
             "description": (
                 "Покажіть у GIF, як обрати напрямок і менеджерів для старту розподілу."
             ),
+            "media_file": "gif-2.webp",
         },
         {
             "title": "Запуск та контроль розподілу",
             "description": (
                 "Покажіть у GIF кнопки запуску, паузи та зупинки авто-розподілу."
             ),
+            "media_file": "gif-3.webp",
         },
         {
             "title": "Готово",
             "description": (
                 "Після останнього кроку модалка закривається, і ви можете одразу працювати в системі."
             ),
+            "media_file": "gif-4.webp",
         },
     ]
 
@@ -624,17 +630,22 @@ def render_onboarding_modal(user_login: str) -> None:
             f"<div class='onboarding-text'>{steps[step]['description']}</div>",
             unsafe_allow_html=True,
         )
-        st.markdown(
-            """
-            <div class="onboarding-gif-slot">
-                <div>
-                    <strong>Місце для GIF / міні-відео</strong><br/>
-                    Вставте сюди медіа з інструкцією для цього кроку.
+        media_filename = str(steps[step]["media_file"])
+        media_path = ONBOARDING_MEDIA_DIR / media_filename
+        if media_path.exists():
+            st.image(str(media_path), use_container_width=True)
+        else:
+            st.markdown(
+                f"""
+                <div class="onboarding-gif-slot">
+                    <div>
+                        <strong>Файл не знайдено</strong><br/>
+                        Додайте медіа: <code>{media_path.as_posix()}</code>
+                    </div>
                 </div>
-            </div>
-            """,
-            unsafe_allow_html=True,
-        )
+                """,
+                unsafe_allow_html=True,
+            )
         st.caption(f"Крок {step + 1} з {len(steps)}")
         st.checkbox("Більше не показувати", key="onboarding_do_not_show")
 
