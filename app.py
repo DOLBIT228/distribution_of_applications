@@ -541,12 +541,22 @@ def render_onboarding_modal(user_login: str) -> None:
 
     steps = [
         {
+            "title": "Вітаємо в авто-розподілі",
+            "description": (
+                "Це короткий тур по основним елементам сторінки. Натисніть «Далі», щоб перейти до "
+                "пояснення кожного блоку."
+            ),
+            "target_key": None,
+        },
+        {
             "title": "Крок 1. Оберіть менеджерів",
             "description": "Додайте менеджерів, які мають брати заявки в роботу.",
+            "target_key": "onboarding_managers_block",
         },
         {
             "title": "Крок 2. Запустіть авто-розподіл",
             "description": "Натисніть «Почати авто-розподіл», щоб система почала видавати заявки автоматично.",
+            "target_key": "onboarding_actions_block",
         },
         {
             "title": "Крок 3. Підтримання 3 угод в роботі",
@@ -554,15 +564,20 @@ def render_onboarding_modal(user_login: str) -> None:
                 "Система автоматично добирає заявки так, щоб у кожного обраного менеджера було до 3 угод "
                 "в статусі «Угода в роботі»."
             ),
+            "target_key": "onboarding_workload_block",
         },
         {
             "title": "Крок 4. Пауза / зупинка",
             "description": "Для паузи або зупинки вкажіть причину — вона піде в чат-сповіщення.",
+            "target_key": "onboarding_actions_block",
         },
     ]
 
     step = int(st.session_state.get("onboarding_step", 0))
     step = max(0, min(step, len(steps) - 1))
+
+    active_target_key = steps[step].get("target_key")
+    spotlight_class = f"st-key-{active_target_key}" if active_target_key else ""
 
     st.markdown(
         """
@@ -572,12 +587,12 @@ def render_onboarding_modal(user_login: str) -> None:
                 inset: 0;
                 background: rgba(7, 15, 35, 0.66);
                 z-index: 9998;
+                pointer-events: none;
             }
             .onboarding-card {
                 position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
+                top: 24px;
+                right: 24px;
                 width: min(760px, 92vw);
                 background: white;
                 border-radius: 16px;
@@ -586,7 +601,39 @@ def render_onboarding_modal(user_login: str) -> None:
                 z-index: 9999;
                 border: 2px solid #3a7cff;
             }
+            .onboarding-spotlight {
+                position: relative;
+                z-index: 9999;
+                border-radius: 14px;
+                box-shadow: 0 0 0 6px rgba(255,255,255,0.9), 0 12px 30px rgba(0,0,0,0.35);
+                background: #ffffff;
+            }
+            .onboarding-card .stButton > button {
+                width: 100%;
+            }
         </style>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    if spotlight_class:
+        st.markdown(
+            f"""
+            <style>
+                .{spotlight_class} {{
+                    position: relative;
+                    z-index: 9999;
+                    border-radius: 14px;
+                    box-shadow: 0 0 0 6px rgba(255,255,255,0.9), 0 12px 30px rgba(0,0,0,0.35);
+                    background: #ffffff;
+                }}
+            </style>
+            """,
+            unsafe_allow_html=True,
+        )
+
+    st.markdown(
+        """
         <div class="onboarding-backdrop"></div>
         <div class="onboarding-card">
             <h3 style="margin:0 0 8px 0;">Навчання по авто-розподілу</h3>
@@ -596,13 +643,13 @@ def render_onboarding_modal(user_login: str) -> None:
         unsafe_allow_html=True,
     )
 
-    with st.container(border=True):
+    with st.container(border=True, key="onboarding_panel"):
         st.markdown(f"### {steps[step]['title']}")
         st.write(steps[step]["description"])
         st.caption(f"Крок {step + 1} з {len(steps)}")
         st.checkbox("Більше не показувати", key="onboarding_do_not_show")
 
-        col_prev, col_next, col_finish = st.columns(3)
+        col_prev, col_next, col_finish, col_close = st.columns(4)
         with col_prev:
             if st.button("Назад", disabled=step == 0, key="onboarding_prev"):
                 st.session_state["onboarding_step"] = step - 1
@@ -614,6 +661,11 @@ def render_onboarding_modal(user_login: str) -> None:
         with col_finish:
             if st.button("Завершити", type="primary", key="onboarding_finish"):
                 set_onboarding_visibility(user_login, bool(st.session_state.get("onboarding_do_not_show")))
+                st.session_state["onboarding_step"] = 0
+                st.session_state["show_onboarding"] = False
+                st.rerun()
+        with col_close:
+            if st.button("Закрити", key="onboarding_close"):
                 st.session_state["onboarding_step"] = 0
                 st.session_state["show_onboarding"] = False
                 st.rerun()
@@ -668,16 +720,17 @@ def distribution_screen() -> None:
     if "show_onboarding" not in st.session_state:
         st.session_state["show_onboarding"] = should_show_onboarding(user_login)
 
-    col1, col2 = st.columns(2)
-    with col1:
-        direction_name = st.selectbox("Напрямок", list(direction_options.keys()))
-    with col2:
-        st.multiselect(
-            "Менеджери для розподілу",
-            options=list(manager_options.keys()),
-            key="manager_selection",
-            help="ID менеджерів не показуються в інтерфейсі.",
-        )
+    with st.container(key="onboarding_managers_block"):
+        col1, col2 = st.columns(2)
+        with col1:
+            direction_name = st.selectbox("Напрямок", list(direction_options.keys()))
+        with col2:
+            st.multiselect(
+                "Менеджери для розподілу",
+                options=list(manager_options.keys()),
+                key="manager_selection",
+                help="ID менеджерів не показуються в інтерфейсі.",
+            )
     selected_managers = list(st.session_state.get("manager_selection", []))
 
     direction = direction_options[direction_name]
@@ -709,54 +762,55 @@ def distribution_screen() -> None:
 
     st.caption("Логіка напрямку: Сайт (Тест)")
 
-    action_col1, action_col2, action_col3, action_col4 = st.columns(4)
-    with action_col1:
-        if st.button(
-            "Почати авто-розподіл",
-            type="primary",
-            disabled=(
-                not target_stage_id
-                or not selected_managers
-                or st.session_state["auto_distribution_state"] == "running"
-            ),
-        ):
-            st.session_state["active_managers"] = selected_managers.copy()
-            st.session_state["auto_distribution_state"] = "running"
-            st.session_state["pending_control_action"] = None
-            managers_text = ", ".join(st.session_state["active_managers"]) if st.session_state["active_managers"] else "не обрано"
-            send_chatbot_message(
-                "\n".join(
-                    [
-                        "▶️ Розподіл заявок розпочато.",
-                        f"Напрямок: {direction_name}",
-                        f"Користувач: {user.get('name', '-')}",
-                        f"Менеджери: {managers_text}",
-                    ]
+    with st.container(key="onboarding_actions_block"):
+        action_col1, action_col2, action_col3, action_col4 = st.columns(4)
+        with action_col1:
+            if st.button(
+                "Почати авто-розподіл",
+                type="primary",
+                disabled=(
+                    not target_stage_id
+                    or not selected_managers
+                    or st.session_state["auto_distribution_state"] == "running"
+                ),
+            ):
+                st.session_state["active_managers"] = selected_managers.copy()
+                st.session_state["auto_distribution_state"] = "running"
+                st.session_state["pending_control_action"] = None
+                managers_text = ", ".join(st.session_state["active_managers"]) if st.session_state["active_managers"] else "не обрано"
+                send_chatbot_message(
+                    "\n".join(
+                        [
+                            "▶️ Розподіл заявок розпочато.",
+                            f"Напрямок: {direction_name}",
+                            f"Користувач: {user.get('name', '-')}",
+                            f"Менеджери: {managers_text}",
+                        ]
+                    )
                 )
-            )
-            st.rerun()
+                st.rerun()
 
-    with action_col2:
-        if st.button(
-            "Пауза",
-            disabled=st.session_state["auto_distribution_state"] != "running",
-        ):
-            st.session_state["pending_control_action"] = "pause"
+        with action_col2:
+            if st.button(
+                "Пауза",
+                disabled=st.session_state["auto_distribution_state"] != "running",
+            ):
+                st.session_state["pending_control_action"] = "pause"
 
-    with action_col3:
-        if st.button("Зупинити авто-розподіл", disabled=st.session_state["auto_distribution_state"] == "stopped"):
-            st.session_state["pending_control_action"] = "stop"
+        with action_col3:
+            if st.button("Зупинити авто-розподіл", disabled=st.session_state["auto_distribution_state"] == "stopped"):
+                st.session_state["pending_control_action"] = "stop"
 
-    with action_col4:
-        if st.button(
-            "Пауза для зміни менеджерів",
-            disabled=st.session_state["auto_distribution_state"] != "running",
-            help="Коротка пауза: змініть список менеджерів і продовжіть без повної зупинки.",
-        ):
-            st.session_state["reconfig_previous_managers"] = list(st.session_state.get("active_managers", []))
-            st.session_state["auto_distribution_state"] = "reconfiguring"
-            st.session_state["pending_control_action"] = None
-            st.rerun()
+        with action_col4:
+            if st.button(
+                "Пауза для зміни менеджерів",
+                disabled=st.session_state["auto_distribution_state"] != "running",
+                help="Коротка пауза: змініть список менеджерів і продовжіть без повної зупинки.",
+            ):
+                st.session_state["reconfig_previous_managers"] = list(st.session_state.get("active_managers", []))
+                st.session_state["auto_distribution_state"] = "reconfiguring"
+                st.session_state["pending_control_action"] = None
+                st.rerun()
 
     pending_action = st.session_state.get("pending_control_action")
     if pending_action in {"pause", "stop"}:
@@ -910,20 +964,21 @@ def distribution_screen() -> None:
         managers_for_table = list(dict.fromkeys(selected_managers + summary_managers))
     st.dataframe(build_summary_table(direction_name, managers_for_table, deal_types), use_container_width=True)
 
-    st.subheader("Кількість в роботі у менеджера")
-    counts = st.session_state.get("last_in_progress_counts", {})
-    if counts and managers_for_table:
-        st.dataframe(
-            [
-                {"Менеджер": name, "Активних в роботі": counts.get(name, 0)}
-                for name in managers_for_table
-            ],
-            use_container_width=True,
-        )
-    elif managers_for_table:
-        st.info("Дані з'являться після першого запуску авто-розподілу.")
-    else:
-        st.info("Оберіть менеджерів, щоб побачити таблицю навантаження.")
+    with st.container(key="onboarding_workload_block"):
+        st.subheader("Кількість в роботі у менеджера")
+        counts = st.session_state.get("last_in_progress_counts", {})
+        if counts and managers_for_table:
+            st.dataframe(
+                [
+                    {"Менеджер": name, "Активних в роботі": counts.get(name, 0)}
+                    for name in managers_for_table
+                ],
+                use_container_width=True,
+            )
+        elif managers_for_table:
+            st.info("Дані з'являться після першого запуску авто-розподілу.")
+        else:
+            st.info("Оберіть менеджерів, щоб побачити таблицю навантаження.")
 
     if st.button("Очистити значення", type="secondary"):
         deleted_rows = clear_daily_distribution(direction_name)
