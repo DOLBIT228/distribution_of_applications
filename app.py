@@ -533,6 +533,7 @@ def run_distribution_once(
     }
 
 
+@st.fragment
 def render_onboarding_modal(user_login: str) -> None:
     if "onboarding_step" not in st.session_state:
         st.session_state["onboarding_step"] = 0
@@ -578,53 +579,51 @@ def render_onboarding_modal(user_login: str) -> None:
                 background: rgba(8, 16, 34, 0.72);
                 z-index: 9998;
             }
-            .onboarding-modal {
-                position: fixed;
-                top: 50%;
-                left: 50%;
-                transform: translate(-50%, -50%);
-                width: min(820px, 92vw);
-                background: #ffffff;
-                border-radius: 18px;
-                padding: 24px;
-                box-shadow: 0 24px 54px rgba(0, 0, 0, 0.35);
-                z-index: 9999;
-                border: 1px solid #d8e3ff;
-            }
-            .onboarding-gif-slot {
-                border: 2px dashed #bdd0ff;
-                border-radius: 14px;
-                height: min(280px, 40vh);
-                background: linear-gradient(180deg, #f7faff 0%, #ecf3ff 100%);
-                display: flex;
-                align-items: center;
-                justify-content: center;
-                text-align: center;
-                padding: 16px;
-                color: #3b4b6b;
-                font-size: 0.98rem;
-            }
             .st-key-onboarding_panel {
                 position: fixed;
                 top: 50%;
                 left: 50%;
                 transform: translate(-50%, -50%);
-                width: min(820px, 92vw);
+                width: min(980px, 96vw);
                 z-index: 10000;
+                background: #ffffff;
+                border-radius: 20px;
+                padding: 28px;
+                border: 1px solid #d8e3ff;
+                box-shadow: 0 24px 54px rgba(0, 0, 0, 0.35);
+            }
+            .st-key-onboarding_panel .onboarding-text {
+                min-height: 72px;
+                font-size: 1.04rem;
+            }
+            .st-key-onboarding_panel .onboarding-gif-slot {
+                border: 2px dashed #bdd0ff;
+                border-radius: 14px;
+                height: min(430px, 52vh);
+                background: linear-gradient(180deg, #f7faff 0%, #ecf3ff 100%);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                padding: 20px;
+                color: #3b4b6b;
+                font-size: 1.02rem;
             }
             .st-key-onboarding_panel .stButton > button {
                 width: 100%;
             }
         </style>
         <div class="onboarding-backdrop"></div>
-        <div class="onboarding-modal"></div>
         """,
         unsafe_allow_html=True,
     )
 
-    with st.container(border=True, key="onboarding_panel"):
+    with st.container(key="onboarding_panel"):
         st.markdown(f"### {steps[step]['title']}")
-        st.write(steps[step]["description"])
+        st.markdown(
+            f"<div class='onboarding-text'>{steps[step]['description']}</div>",
+            unsafe_allow_html=True,
+        )
         st.markdown(
             """
             <div class="onboarding-gif-slot">
@@ -643,7 +642,6 @@ def render_onboarding_modal(user_login: str) -> None:
         with col_prev:
             if st.button("Назад", disabled=step == 0, key="onboarding_prev"):
                 st.session_state["onboarding_step"] = step - 1
-                st.rerun()
         with col_next:
             next_label = "Завершити" if step == len(steps) - 1 else "Далі"
             if st.button(next_label, type="primary", key="onboarding_next"):
@@ -653,7 +651,6 @@ def render_onboarding_modal(user_login: str) -> None:
                     st.session_state["show_onboarding"] = False
                 else:
                     st.session_state["onboarding_step"] = step + 1
-                st.rerun()
         with col_close:
             if st.button("Закрити", key="onboarding_close"):
                 set_onboarding_visibility(user_login, bool(st.session_state.get("onboarding_do_not_show")))
@@ -710,6 +707,11 @@ def distribution_screen() -> None:
         st.session_state["reconfig_previous_managers"] = []
     if "show_onboarding" not in st.session_state:
         st.session_state["show_onboarding"] = should_show_onboarding(user_login)
+
+    if st.session_state.get("show_onboarding"):
+        render_onboarding_modal(user_login)
+        st.info("Онбординг активний. Основний екран не оновлюється, доки не закриєте онбординг.")
+        return
 
     with st.container(key="onboarding_managers_block"):
         col1, col2 = st.columns(2)
