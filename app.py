@@ -2,6 +2,7 @@ from collections import defaultdict
 from contextlib import closing
 from datetime import date, datetime
 from pathlib import Path
+import base64
 import sqlite3
 import time
 from typing import Dict, List, Optional
@@ -217,6 +218,21 @@ def set_onboarding_visibility(user_login: str, hide_onboarding: bool) -> None:
             (user_login, 1 if hide_onboarding else 0),
         )
         conn.commit()
+
+
+def render_onboarding_video(media_path: Path) -> None:
+    encoded_video = base64.b64encode(media_path.read_bytes()).decode("utf-8")
+    st.markdown(
+        f"""
+        <div class="onboarding-video-wrap">
+            <video autoplay loop muted playsinline controls preload="metadata">
+                <source src="data:video/webm;base64,{encoded_video}" type="video/webm">
+                Ваш браузер не підтримує відтворення відео.
+            </video>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
 
 
 def store_distribution_rows(direction_name: str, rows: List[Dict]) -> None:
@@ -615,6 +631,20 @@ def render_onboarding_modal(user_login: str) -> None:
                 color: #3b4b6b;
                 font-size: 1.02rem;
             }
+            .st-key-onboarding_panel .onboarding-video-wrap {
+                display: flex;
+                justify-content: center;
+                margin: 0 auto 0.5rem auto;
+                width: min(760px, 100%);
+            }
+            .st-key-onboarding_panel .onboarding-video-wrap video {
+                width: 100%;
+                max-height: min(360px, 45vh);
+                border-radius: 14px;
+                border: 1px solid #d4e2ff;
+                background: #000;
+                object-fit: contain;
+            }
             .st-key-onboarding_panel .stButton > button {
                 width: 100%;
             }
@@ -633,7 +663,7 @@ def render_onboarding_modal(user_login: str) -> None:
         media_filename = str(steps[step]["media_file"])
         media_path = ONBOARDING_MEDIA_DIR / media_filename
         if media_path.exists():
-            st.video(str(media_path))
+            render_onboarding_video(media_path)
         else:
             st.markdown(
                 f"""
