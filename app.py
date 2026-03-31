@@ -543,41 +543,31 @@ def render_onboarding_modal(user_login: str) -> None:
         {
             "title": "Вітаємо в авто-розподілі",
             "description": (
-                "Це короткий тур по основним елементам сторінки. Натисніть «Далі», щоб перейти до "
-                "пояснення кожного блоку."
+                "Коротко покажемо, як працює сервіс. Вставте тут GIF або міні-відео з загальним оглядом."
             ),
-            "target_key": None,
         },
         {
-            "title": "Крок 1. Оберіть менеджерів",
-            "description": "Додайте менеджерів, які мають брати заявки в роботу.",
-            "target_key": "onboarding_managers_block",
-        },
-        {
-            "title": "Крок 2. Запустіть авто-розподіл",
-            "description": "Натисніть «Почати авто-розподіл», щоб система почала видавати заявки автоматично.",
-            "target_key": "onboarding_actions_block",
-        },
-        {
-            "title": "Крок 3. Підтримання 3 угод в роботі",
+            "title": "Оберіть менеджерів і напрямок",
             "description": (
-                "Система автоматично добирає заявки так, щоб у кожного обраного менеджера було до 3 угод "
-                "в статусі «Угода в роботі»."
+                "Покажіть у GIF, як обрати напрямок і менеджерів для старту розподілу."
             ),
-            "target_key": "onboarding_workload_block",
         },
         {
-            "title": "Крок 4. Пауза / зупинка",
-            "description": "Для паузи або зупинки вкажіть причину — вона піде в чат-сповіщення.",
-            "target_key": "onboarding_actions_block",
+            "title": "Запуск та контроль розподілу",
+            "description": (
+                "Покажіть у GIF кнопки запуску, паузи та зупинки авто-розподілу."
+            ),
+        },
+        {
+            "title": "Готово",
+            "description": (
+                "Після останнього кроку модалка закривається, і ви можете одразу працювати в системі."
+            ),
         },
     ]
 
     step = int(st.session_state.get("onboarding_step", 0))
     step = max(0, min(step, len(steps) - 1))
-
-    active_target_key = steps[step].get("target_key")
-    spotlight_class = f"st-key-{active_target_key}" if active_target_key else ""
 
     st.markdown(
         """
@@ -585,60 +575,49 @@ def render_onboarding_modal(user_login: str) -> None:
             .onboarding-backdrop {
                 position: fixed;
                 inset: 0;
-                background: rgba(7, 15, 35, 0.66);
+                background: rgba(8, 16, 34, 0.72);
                 z-index: 9998;
-                pointer-events: none;
             }
-            .onboarding-card {
+            .onboarding-modal {
                 position: fixed;
-                top: 24px;
-                right: 24px;
-                width: min(760px, 92vw);
-                background: white;
-                border-radius: 16px;
-                padding: 22px;
-                box-shadow: 0 20px 45px rgba(0,0,0,0.25);
-                z-index: 9999;
-                border: 2px solid #3a7cff;
-            }
-            .onboarding-spotlight {
-                position: relative;
-                z-index: 9999;
-                border-radius: 14px;
-                box-shadow: 0 0 0 6px rgba(255,255,255,0.9), 0 12px 30px rgba(0,0,0,0.35);
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: min(820px, 92vw);
                 background: #ffffff;
+                border-radius: 18px;
+                padding: 24px;
+                box-shadow: 0 24px 54px rgba(0, 0, 0, 0.35);
+                z-index: 9999;
+                border: 1px solid #d8e3ff;
             }
-            .onboarding-card .stButton > button {
+            .onboarding-gif-slot {
+                border: 2px dashed #bdd0ff;
+                border-radius: 14px;
+                height: min(280px, 40vh);
+                background: linear-gradient(180deg, #f7faff 0%, #ecf3ff 100%);
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                text-align: center;
+                padding: 16px;
+                color: #3b4b6b;
+                font-size: 0.98rem;
+            }
+            .st-key-onboarding_panel {
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: min(820px, 92vw);
+                z-index: 10000;
+            }
+            .st-key-onboarding_panel .stButton > button {
                 width: 100%;
             }
         </style>
-        """,
-        unsafe_allow_html=True,
-    )
-
-    if spotlight_class:
-        st.markdown(
-            f"""
-            <style>
-                .{spotlight_class} {{
-                    position: relative;
-                    z-index: 9999;
-                    border-radius: 14px;
-                    box-shadow: 0 0 0 6px rgba(255,255,255,0.9), 0 12px 30px rgba(0,0,0,0.35);
-                    background: #ffffff;
-                }}
-            </style>
-            """,
-            unsafe_allow_html=True,
-        )
-
-    st.markdown(
-        """
         <div class="onboarding-backdrop"></div>
-        <div class="onboarding-card">
-            <h3 style="margin:0 0 8px 0;">Навчання по авто-розподілу</h3>
-            <p style="margin:0; color:#506080;">Покрокова підказка при першому вході.</p>
-        </div>
+        <div class="onboarding-modal"></div>
         """,
         unsafe_allow_html=True,
     )
@@ -646,26 +625,38 @@ def render_onboarding_modal(user_login: str) -> None:
     with st.container(border=True, key="onboarding_panel"):
         st.markdown(f"### {steps[step]['title']}")
         st.write(steps[step]["description"])
+        st.markdown(
+            """
+            <div class="onboarding-gif-slot">
+                <div>
+                    <strong>Місце для GIF / міні-відео</strong><br/>
+                    Вставте сюди медіа з інструкцією для цього кроку.
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True,
+        )
         st.caption(f"Крок {step + 1} з {len(steps)}")
         st.checkbox("Більше не показувати", key="onboarding_do_not_show")
 
-        col_prev, col_next, col_finish, col_close = st.columns(4)
+        col_prev, col_next, col_close = st.columns(3)
         with col_prev:
             if st.button("Назад", disabled=step == 0, key="onboarding_prev"):
                 st.session_state["onboarding_step"] = step - 1
                 st.rerun()
         with col_next:
-            if st.button("Далі", disabled=step >= len(steps) - 1, key="onboarding_next"):
-                st.session_state["onboarding_step"] = step + 1
-                st.rerun()
-        with col_finish:
-            if st.button("Завершити", type="primary", key="onboarding_finish"):
-                set_onboarding_visibility(user_login, bool(st.session_state.get("onboarding_do_not_show")))
-                st.session_state["onboarding_step"] = 0
-                st.session_state["show_onboarding"] = False
+            next_label = "Завершити" if step == len(steps) - 1 else "Далі"
+            if st.button(next_label, type="primary", key="onboarding_next"):
+                if step >= len(steps) - 1:
+                    set_onboarding_visibility(user_login, bool(st.session_state.get("onboarding_do_not_show")))
+                    st.session_state["onboarding_step"] = 0
+                    st.session_state["show_onboarding"] = False
+                else:
+                    st.session_state["onboarding_step"] = step + 1
                 st.rerun()
         with col_close:
             if st.button("Закрити", key="onboarding_close"):
+                set_onboarding_visibility(user_login, bool(st.session_state.get("onboarding_do_not_show")))
                 st.session_state["onboarding_step"] = 0
                 st.session_state["show_onboarding"] = False
                 st.rerun()
