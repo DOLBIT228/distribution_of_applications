@@ -546,30 +546,30 @@ def render_onboarding_modal(user_login: str) -> None:
         {
             "title": "Вітаємо в авто-розподілі",
             "description": (
-                "Коротко покажемо, як працює сервіс. Вставте тут GIF або міні-відео з загальним оглядом."
+                "Коротко покажемо, як працює сервіс. Вставте тут коротке WEBM-відео з загальним оглядом."
             ),
-            "media_file": "gif-1.webp",
+            "media_file": "gif-1.webm",
         },
         {
             "title": "Оберіть менеджерів і напрямок",
             "description": (
-                "Покажіть у GIF, як обрати напрямок і менеджерів для старту розподілу."
+                "Покажіть у WEBM-відео, як обрати напрямок і менеджерів для старту розподілу."
             ),
-            "media_file": "gif-2.webp",
+            "media_file": "gif-2.webm",
         },
         {
             "title": "Запуск та контроль розподілу",
             "description": (
-                "Покажіть у GIF кнопки запуску, паузи та зупинки авто-розподілу."
+                "Покажіть у WEBM-відео кнопки запуску, паузи та зупинки авто-розподілу."
             ),
-            "media_file": "gif-3.webp",
+            "media_file": "gif-3.webm",
         },
         {
             "title": "Готово",
             "description": (
                 "Після останнього кроку модалка закривається, і ви можете одразу працювати в системі."
             ),
-            "media_file": "gif-4.webp",
+            "media_file": "gif-4.webm",
         },
     ]
 
@@ -633,7 +633,7 @@ def render_onboarding_modal(user_login: str) -> None:
         media_filename = str(steps[step]["media_file"])
         media_path = ONBOARDING_MEDIA_DIR / media_filename
         if media_path.exists():
-            st.image(str(media_path), use_container_width=True)
+            st.video(str(media_path))
         else:
             st.markdown(
                 f"""
