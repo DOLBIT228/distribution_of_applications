@@ -1,4 +1,5 @@
 from collections import defaultdict
+from contextlib import closing
 from datetime import date, datetime
 import sqlite3
 import time
@@ -36,18 +37,7 @@ DB_PATH = "distribution_history.db"
 DASHBOARD_URL = "https://panel-for-manager-call.streamlit.app/"
 DEFAULT_BATCH_SIZE = 3
 
-LANDING_SOURCE_NAMES = {
-    "лендинг 1 грам",
-    "лендинг -2=1",
-    "лендинг 2 за 1 оффер",
-    "лендинг каблучки 100$",
-    "лендинг каблучки 1 грам",
-    "лендинг - стара ціна 2025",
-    "лендинг раннє бронювання",
-}
-
-SITE_DEAL_TYPES = ["Сайт", "Лендинг"]
-INSTAGRAM_DEAL_TYPES = ["Інстаграм"]
+SITE_DEAL_TYPES = ["Сайт (Тест)"]
 
 
 def _secret_required(path: str):
@@ -142,35 +132,15 @@ def fetch_source_map() -> Dict[str, str]:
 
 
 def get_direction_logic(direction_name: str, direction: Dict) -> str:
-    explicit_logic = str(direction.get("distribution_logic") or "").strip().lower()
-    if explicit_logic in {"site", "instagram"}:
-        return explicit_logic
-
-    if "інст" in direction_name.lower():
-        return "instagram"
-
+    # У поточній версії додатка підтримується лише логіка Сайт (Тест).
     return "site"
 
 
 def classify_deal_type(deal: Dict, source_map: Dict[str, str], logic: str) -> str:
-    if logic == "instagram":
-        return "Інстаграм"
-
-    source_id = str(deal.get("SOURCE_ID") or "")
-    source_name = source_map.get(source_id, source_id).strip().lower()
-
-    if source_name in LANDING_SOURCE_NAMES:
-        return "Лендинг"
-
-    if source_name == "лендинг":
-        return "Сайт"
-
-    return "Лендинг"
+    return "Сайт (Тест)"
 
 
 def get_deal_types_for_logic(logic: str) -> List[str]:
-    if logic == "instagram":
-        return INSTAGRAM_DEAL_TYPES
     return SITE_DEAL_TYPES
 
 
@@ -210,9 +180,41 @@ def init_db() -> None:
             )
             """
         )
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS user_preferences (
+                user_login TEXT PRIMARY KEY,
+                hide_onboarding INTEGER NOT NULL DEFAULT 0
+            )
+            """
+        )
         conn.commit()
     finally:
         conn.close()
+
+
+def should_show_onboarding(user_login: str) -> bool:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        row = conn.execute(
+            "SELECT hide_onboarding FROM user_preferences WHERE user_login = ?",
+            (user_login,),
+        ).fetchone()
+    if not row:
+        return True
+    return int(row[0]) == 0
+
+
+def set_onboarding_visibility(user_login: str, hide_onboarding: bool) -> None:
+    with closing(sqlite3.connect(DB_PATH)) as conn:
+        conn.execute(
+            """
+            INSERT INTO user_preferences (user_login, hide_onboarding)
+            VALUES (?, ?)
+            ON CONFLICT(user_login) DO UPDATE SET hide_onboarding = excluded.hide_onboarding
+            """,
+            (user_login, 1 if hide_onboarding else 0),
+        )
+        conn.commit()
 
 
 def store_distribution_rows(direction_name: str, rows: List[Dict]) -> None:
@@ -387,18 +389,15 @@ def select_manager_for_deal(
     selected_managers: List[str],
     manager_state: Dict[str, Dict[str, Optional[str] | int]],
     logic: str,
-    batch_load: Dict[str, int],
+    remaining_slots: Dict[str, int],
     batch_size: int,
 ) -> str:
-    under_limit = [manager for manager in selected_managers if int(batch_load[manager]) < batch_size]
+    under_limit = [manager for manager in selected_managers if int(remaining_slots[manager]) > 0]
     if not under_limit:
-        raise RuntimeError("Немає доступних менеджерів у межах поточної пачки.")
+        raise RuntimeError("Немає доступних менеджерів для добору до ліміту.")
 
-    minimum_batch_total = min(int(batch_load[manager]) for manager in under_limit)
-    candidates = [manager for manager in under_limit if int(batch_load[manager]) == minimum_batch_total]
-
-    if logic == "instagram":
-        return candidates[0]
+    maximum_remaining = max(int(remaining_slots[manager]) for manager in under_limit)
+    candidates = [manager for manager in under_limit if int(remaining_slots[manager]) == maximum_remaining]
 
     preferred_candidates = [
         manager for manager in candidates if manager_state[manager].get("last_type") != deal_type
@@ -467,24 +466,28 @@ def run_distribution_once(
         for manager_name in selected_managers
     }
 
-    available_managers = [
-        manager_name for manager_name in selected_managers if in_progress_counts[manager_name] == 0
-    ]
+    remaining_slots = {
+        manager_name: max(0, batch_size - in_progress_counts[manager_name])
+        for manager_name in selected_managers
+    }
+    available_managers = [manager_name for manager_name in selected_managers if remaining_slots[manager_name] > 0]
 
     if not available_managers:
         return {
             "status": "warning",
-            "message": "Немає вільних менеджерів: у всіх є активні угоди в статусі 'Угода в роботі'.",
+            "message": (
+                f"Немає вільних слотів: у всіх менеджерів вже є по {batch_size} "
+                "активних угод у статусі 'Угода в роботі'."
+            ),
             "in_progress_counts": in_progress_counts,
             "results": [],
         }
 
-    max_for_batch = len(available_managers) * batch_size
+    max_for_batch = sum(remaining_slots[manager_name] for manager_name in available_managers)
     distribution_size = min(len(deals_all), max_for_batch)
     target_deals = deals_all[:distribution_size]
 
     manager_state = get_daily_manager_state(direction_name, available_managers, deal_types)
-    batch_load = {manager_name: 0 for manager_name in available_managers}
     results = []
 
     for deal in target_deals:
@@ -494,7 +497,7 @@ def run_distribution_once(
             available_managers,
             manager_state,
             distribution_logic,
-            batch_load,
+            remaining_slots,
             batch_size,
         )
         manager_id = manager_ids[manager_name]
@@ -504,7 +507,7 @@ def run_distribution_once(
         manager_state[manager_name][deal_type] = int(manager_state[manager_name][deal_type]) + 1
         manager_state[manager_name]["total"] = int(manager_state[manager_name]["total"]) + 1
         manager_state[manager_name]["last_type"] = deal_type
-        batch_load[manager_name] = int(batch_load[manager_name]) + 1
+        remaining_slots[manager_name] = int(remaining_slots[manager_name]) - 1
 
         update_deal_assignment_and_stage(int(deal["ID"]), manager_id, target_stage_id)
         results.append(
@@ -523,11 +526,97 @@ def run_distribution_once(
         "status": "success",
         "message": (
             f"Успішно розподілено {len(results)} заявок. "
-            f"Вільних менеджерів: {len(available_managers)}. Розмір пачки: {batch_size}."
+            f"Менеджерів з доступними слотами: {len(available_managers)}. Ціль в роботі: {batch_size}."
         ),
         "in_progress_counts": in_progress_counts,
         "results": results,
     }
+
+
+def render_onboarding_modal(user_login: str) -> None:
+    if "onboarding_step" not in st.session_state:
+        st.session_state["onboarding_step"] = 0
+    if "onboarding_do_not_show" not in st.session_state:
+        st.session_state["onboarding_do_not_show"] = False
+
+    steps = [
+        {
+            "title": "Крок 1. Оберіть менеджерів",
+            "description": "Додайте менеджерів, які мають брати заявки в роботу.",
+        },
+        {
+            "title": "Крок 2. Запустіть авто-розподіл",
+            "description": "Натисніть «Почати авто-розподіл», щоб система почала видавати заявки автоматично.",
+        },
+        {
+            "title": "Крок 3. Підтримання 3 угод в роботі",
+            "description": (
+                "Система автоматично добирає заявки так, щоб у кожного обраного менеджера було до 3 угод "
+                "в статусі «Угода в роботі»."
+            ),
+        },
+        {
+            "title": "Крок 4. Пауза / зупинка",
+            "description": "Для паузи або зупинки вкажіть причину — вона піде в чат-сповіщення.",
+        },
+    ]
+
+    step = int(st.session_state.get("onboarding_step", 0))
+    step = max(0, min(step, len(steps) - 1))
+
+    st.markdown(
+        """
+        <style>
+            .onboarding-backdrop {
+                position: fixed;
+                inset: 0;
+                background: rgba(7, 15, 35, 0.66);
+                z-index: 9998;
+            }
+            .onboarding-card {
+                position: fixed;
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                width: min(760px, 92vw);
+                background: white;
+                border-radius: 16px;
+                padding: 22px;
+                box-shadow: 0 20px 45px rgba(0,0,0,0.25);
+                z-index: 9999;
+                border: 2px solid #3a7cff;
+            }
+        </style>
+        <div class="onboarding-backdrop"></div>
+        <div class="onboarding-card">
+            <h3 style="margin:0 0 8px 0;">Навчання по авто-розподілу</h3>
+            <p style="margin:0; color:#506080;">Покрокова підказка при першому вході.</p>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    with st.container(border=True):
+        st.markdown(f"### {steps[step]['title']}")
+        st.write(steps[step]["description"])
+        st.caption(f"Крок {step + 1} з {len(steps)}")
+        st.checkbox("Більше не показувати", key="onboarding_do_not_show")
+
+        col_prev, col_next, col_finish = st.columns(3)
+        with col_prev:
+            if st.button("Назад", disabled=step == 0, key="onboarding_prev"):
+                st.session_state["onboarding_step"] = step - 1
+                st.rerun()
+        with col_next:
+            if st.button("Далі", disabled=step >= len(steps) - 1, key="onboarding_next"):
+                st.session_state["onboarding_step"] = step + 1
+                st.rerun()
+        with col_finish:
+            if st.button("Завершити", type="primary", key="onboarding_finish"):
+                set_onboarding_visibility(user_login, bool(st.session_state.get("onboarding_do_not_show")))
+                st.session_state["onboarding_step"] = 0
+                st.session_state["show_onboarding"] = False
+                st.rerun()
 
 
 def login_screen() -> None:
@@ -549,6 +638,7 @@ def login_screen() -> None:
 
 def distribution_screen() -> None:
     user = st.session_state.get("user", {})
+    user_login = str(user.get("login") or "")
 
     st.title("Розподіл заявок між менеджерами")
     st.caption(
@@ -575,6 +665,8 @@ def distribution_screen() -> None:
         st.session_state["active_managers"] = []
     if "reconfig_previous_managers" not in st.session_state:
         st.session_state["reconfig_previous_managers"] = []
+    if "show_onboarding" not in st.session_state:
+        st.session_state["show_onboarding"] = should_show_onboarding(user_login)
 
     col1, col2 = st.columns(2)
     with col1:
@@ -615,10 +707,7 @@ def distribution_screen() -> None:
     available_count = len(deals_all)
     st.info(f"Знайдено заявок у статусі: **{available_count}**")
 
-    if distribution_logic == "instagram":
-        st.caption("Логіка напрямку: Instagram (рівномірно по загальній кількості заявок)")
-    else:
-        st.caption("Логіка напрямку: Сайт/Лендинг (розподіл по джерелах)")
+    st.caption("Логіка напрямку: Сайт (Тест)")
 
     action_col1, action_col2, action_col3, action_col4 = st.columns(4)
     with action_col1:
@@ -847,6 +936,9 @@ def distribution_screen() -> None:
     if should_autorefresh:
         time.sleep(auto_interval_seconds)
         st.rerun()
+
+    if st.session_state.get("show_onboarding"):
+        render_onboarding_modal(user_login)
 
 
 init_db()
