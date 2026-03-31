@@ -684,9 +684,16 @@ def distribution_screen() -> None:
     st.caption(
         f"Користувач: {user.get('name', '-')} | ID менеджера акаунта: {user.get('manager_id', '-')}")
 
-    if st.button("Вийти"):
-        st.session_state.clear()
-        st.rerun()
+    top_actions_col1, top_actions_col2, top_actions_col3 = st.columns([1, 1, 6])
+    with top_actions_col1:
+        if st.button("Вийти"):
+            st.session_state.clear()
+            st.rerun()
+    with top_actions_col2:
+        if st.button("Як це працює", help="Відкрити онбординг повторно"):
+            st.session_state["onboarding_step"] = 0
+            st.session_state["show_onboarding"] = True
+            st.rerun()
 
     direction_options = get_direction_config()
     manager_options = get_managers_config()
